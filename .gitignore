@@ -36,3 +36,4 @@ redis_data/
 # Logs
 *.log
 logs/
+logfile
