@@ -1,6 +1,6 @@
 use anyhow::Result;
 use common::models::{Dispute, DisputeStatus, PaymentStatus, Payment, Currency, CaptureMethod};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 pub async fn create_dispute(
@@ -17,51 +17,54 @@ pub async fn create_dispute(
     let now = chrono::Utc::now();
 
     
-    let row = sqlx::query!(
+    let row = sqlx::query(
         r#"
         SELECT
-            id, merchant_id, order_id, amount,
-            currency as "currency: Currency",
-            status as "status: PaymentStatus",
+            id, merchant_id, order_id, amount, currency, status,
             payment_method, description, metadata,
             acquirer_id, acquirer_reference, failure_code, failure_message,
-            capture_method as "capture_method: CaptureMethod",
+            capture_method,
             captured_amount, refunded_amount,
             idempotency_key, created_at, updated_at, captured_at, settled_at, expires_at
         FROM payments
         WHERE id = $1 AND merchant_id = $2
         FOR UPDATE
         "#,
-        payment_id,
-        merchant_id
     )
+    .bind(payment_id)
+    .bind(merchant_id)
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| anyhow::anyhow!("Payment not found"))?;
 
     let payment = Payment {
-        id: row.id,
-        merchant_id: row.merchant_id,
-        order_id: row.order_id,
-        amount: row.amount,
-        currency: row.currency,
-        status: row.status,
-        payment_method: row.payment_method.map(|v| serde_json::from_value(v).unwrap()),
-        description: row.description,
-        metadata: row.metadata.unwrap_or_default(),
-        acquirer_id: row.acquirer_id,
-        acquirer_reference: row.acquirer_reference,
-        failure_code: row.failure_code,
-        failure_message: row.failure_message,
-        capture_method: row.capture_method,
-        captured_amount: row.captured_amount,
-        refunded_amount: row.refunded_amount,
-        idempotency_key: row.idempotency_key,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        captured_at: row.captured_at,
-        settled_at: row.settled_at,
-        expires_at: row.expires_at,
+        id: row.try_get("id")?,
+        merchant_id: row.try_get("merchant_id")?,
+        order_id: row.try_get("order_id")?,
+        amount: row.try_get("amount")?,
+        currency: row.try_get::<Currency, _>("currency")?,
+        status: row.try_get::<PaymentStatus, _>("status")?,
+        payment_method: row
+            .try_get::<Option<serde_json::Value>, _>("payment_method")?
+            .map(serde_json::from_value)
+            .transpose()?,
+        description: row.try_get("description")?,
+        metadata: row
+            .try_get::<Option<serde_json::Value>, _>("metadata")?
+            .unwrap_or_default(),
+        acquirer_id: row.try_get("acquirer_id")?,
+        acquirer_reference: row.try_get("acquirer_reference")?,
+        failure_code: row.try_get("failure_code")?,
+        failure_message: row.try_get("failure_message")?,
+        capture_method: row.try_get::<CaptureMethod, _>("capture_method")?,
+        captured_amount: row.try_get("captured_amount")?,
+        refunded_amount: row.try_get("refunded_amount")?,
+        idempotency_key: row.try_get("idempotency_key")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+        captured_at: row.try_get("captured_at")?,
+        settled_at: row.try_get("settled_at")?,
+        expires_at: row.try_get("expires_at")?,
     };
 
     let dispute = Dispute {
@@ -82,7 +85,7 @@ pub async fn create_dispute(
         updated_at: now,
     };
 
-    sqlx::query!(
+    sqlx::query(
         r#"
         INSERT INTO disputes (
             id, payment_id, merchant_id, amount, currency, status,
@@ -94,46 +97,46 @@ pub async fn create_dispute(
             $7, $8, $9, $10, $11, $12, $13, $14, $14
         )
         "#,
-        dispute.id,
-        dispute.payment_id,
-        dispute.merchant_id,
-        dispute.amount,
-        dispute.currency.to_string() as _,
-        "needs_response" as _,
-        dispute.reason_code,
-        dispute.reason_description,
-        dispute.evidence,
-        dispute.evidence_due_by,
-        dispute.evidence_submitted_at,
-        dispute.resolution,
-        dispute.acquirer_dispute_id,
-        now,
     )
+    .bind(dispute.id)
+    .bind(dispute.payment_id)
+    .bind(dispute.merchant_id)
+    .bind(dispute.amount)
+    .bind(dispute.currency.to_string())
+    .bind("needs_response")
+    .bind(&dispute.reason_code)
+    .bind(&dispute.reason_description)
+    .bind(&dispute.evidence)
+    .bind(dispute.evidence_due_by)
+    .bind(dispute.evidence_submitted_at)
+    .bind(&dispute.resolution)
+    .bind(&dispute.acquirer_dispute_id)
+    .bind(now)
     .execute(&mut *tx)
     .await?;
 
     
-    sqlx::query!(
+    sqlx::query(
         r#"
         UPDATE payments SET status = 'disputed', updated_at = NOW()
         WHERE id = $1
         "#,
-        payment_id
     )
+    .bind(payment_id)
     .execute(&mut *tx)
     .await?;
 
     
     let payload = serde_json::to_value(&dispute).unwrap();
-    sqlx::query!(
+    sqlx::query(
         r#"
         INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, topic)
         VALUES ($1, 'dispute', $2, 'dispute.created', $3, 'rustpay.payments')
         "#,
-        Uuid::new_v4(),
-        dispute.id,
-        payload
     )
+    .bind(Uuid::new_v4())
+    .bind(dispute.id)
+    .bind(payload)
     .execute(&mut *tx)
     .await?;
 

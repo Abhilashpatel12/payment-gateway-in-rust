@@ -29,7 +29,7 @@ async fn health() -> impl IntoResponse {
 }
 
 async fn readiness(axum::extract::State(state): axum::extract::State<GatewayState>) -> impl IntoResponse {
-    let db_ok = sqlx::query!("SELECT 1 AS one")
+    let db_ok = sqlx::query("SELECT 1 AS one")
         .fetch_one(&state.db)
         .await
         .is_ok();

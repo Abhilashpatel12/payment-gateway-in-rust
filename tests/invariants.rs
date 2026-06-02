@@ -1,4 +1,5 @@
 use sqlx::PgPool;
+use sqlx::Row;
 use uuid::Uuid;
 
 
@@ -18,30 +19,34 @@ async fn connect() -> PgPool {
 async fn invariant_ledger_balanced_per_merchant() {
     let db = connect().await;
 
-    let merchants: Vec<Uuid> = sqlx::query_scalar!(
-        "SELECT DISTINCT merchant_id FROM ledger_entries"
-    )
+    let merchants: Vec<Uuid> = sqlx::query_scalar("SELECT DISTINCT merchant_id FROM ledger_entries")
     .fetch_all(&db)
     .await
     .expect("Failed to query ledger merchants");
 
     for merchant_id in merchants {
-        let row = sqlx::query!(
+        let row = sqlx::query(
             r#"
             SELECT
-                SUM(CASE WHEN entry_type = 'credit' THEN amount ELSE 0 END) AS total_credits,
-                SUM(CASE WHEN entry_type = 'debit'  THEN amount ELSE 0 END) AS total_debits
+                SUM(CASE WHEN entry_type = 'credit' THEN amount ELSE 0 END)::BIGINT AS total_credits,
+                SUM(CASE WHEN entry_type = 'debit'  THEN amount ELSE 0 END)::BIGINT AS total_debits
             FROM ledger_entries
             WHERE merchant_id = $1
             "#,
-            merchant_id,
         )
+        .bind(merchant_id)
         .fetch_one(&db)
         .await
         .expect("Ledger balance query failed");
 
-        let credits = row.total_credits.unwrap_or(0);
-        let debits = row.total_debits.unwrap_or(0);
+        let credits = row
+            .try_get::<Option<i64>, _>("total_credits")
+            .expect("Failed to decode total_credits")
+            .unwrap_or(0);
+        let debits = row
+            .try_get::<Option<i64>, _>("total_debits")
+            .expect("Failed to decode total_debits")
+            .unwrap_or(0);
 
         
         assert_eq!(
@@ -66,12 +71,10 @@ async fn invariant_ledger_balanced_per_merchant() {
 async fn invariant_refund_not_exceed_captured() {
     let db = connect().await;
 
-    let violations = sqlx::query!(
+    let violations: Vec<Uuid> = sqlx::query_scalar(
         r#"
         SELECT
-            p.id AS payment_id,
-            COALESCE(p.captured_amount, p.amount) AS captured_amount,
-            SUM(r.amount) AS total_refunded
+            p.id AS payment_id
         FROM payments p
         JOIN refunds r ON r.payment_id = p.id
         WHERE r.status = 'succeeded'
@@ -87,7 +90,7 @@ async fn invariant_refund_not_exceed_captured() {
         violations.is_empty(),
         "INVARIANT VIOLATION: {} payment(s) have total refunds exceeding captured amount: {:?}",
         violations.len(),
-        violations.iter().map(|v| v.payment_id).collect::<Vec<_>>()
+        violations
     );
 }
 
@@ -100,12 +103,10 @@ async fn invariant_refund_not_exceed_captured() {
 async fn invariant_refunded_amount_matches_refund_sum() {
     let db = connect().await;
 
-    let violations = sqlx::query!(
+    let violations: Vec<Uuid> = sqlx::query_scalar(
         r#"
         SELECT
-            p.id AS payment_id,
-            p.refunded_amount AS stored_refunded_amount,
-            COALESCE(SUM(r.amount), 0) AS actual_refund_sum
+            p.id AS payment_id
         FROM payments p
         LEFT JOIN refunds r ON r.payment_id = p.id AND r.status = 'succeeded'
         GROUP BY p.id, p.refunded_amount
@@ -120,7 +121,7 @@ async fn invariant_refunded_amount_matches_refund_sum() {
         violations.is_empty(),
         "INVARIANT VIOLATION: {} payment(s) have mismatched refunded_amount column: {:?}",
         violations.len(),
-        violations.iter().map(|v| v.payment_id).collect::<Vec<_>>()
+        violations
     );
 }
 
@@ -134,7 +135,7 @@ async fn invariant_ledger_entries_are_paired() {
     let db = connect().await;
 
     
-    let orphaned: i64 = sqlx::query_scalar!(
+    let orphaned: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(*)
         FROM ledger_entries le
@@ -147,8 +148,7 @@ async fn invariant_ledger_entries_are_paired() {
     )
     .fetch_one(&db)
     .await
-    .expect("Pair check query failed")
-    .unwrap_or(0);
+    .expect("Pair check query failed");
 
     assert_eq!(
         orphaned, 0,
@@ -166,7 +166,7 @@ async fn invariant_outbox_events_eventually_published() {
     let db = connect().await;
 
     
-    let stuck: i64 = sqlx::query_scalar!(
+    let stuck: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(*)
         FROM outbox_events
@@ -177,8 +177,7 @@ async fn invariant_outbox_events_eventually_published() {
     )
     .fetch_one(&db)
     .await
-    .expect("Outbox stuck check failed")
-    .unwrap_or(0);
+    .expect("Outbox stuck check failed");
 
     assert_eq!(
         stuck, 0,
