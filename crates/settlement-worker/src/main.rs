@@ -16,7 +16,11 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to connect to database")?;
 
-    let settler = settler::Settler::new(db);
+    let system_fee_percentage = std::env::var("SYSTEM_FEE_PERCENTAGE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.02);
+    let settler = settler::Settler::new(db, system_fee_percentage);
 
     tracing::info!("Settlement worker started");
 

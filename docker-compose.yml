@@ -82,6 +82,23 @@ services:
     ports:
       - "8090:8080"
 
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: rustpay_kafka_init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      bash -c "
+        echo 'Waiting for Kafka to be ready...' &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 6 --replication-factor 1 --topic rustpay.payments &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 6 --replication-factor 1 --topic rustpay.webhooks &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 6 --replication-factor 1 --topic rustpay.merchants &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 6 --replication-factor 1 --topic rustpay.ledger &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 6 --replication-factor 1 --topic rustpay.fraud
+        echo 'Kafka topics created.'
+      "
+
   jaeger:
     image: jaegertracing/all-in-one:1.57
     container_name: rustpay_jaeger

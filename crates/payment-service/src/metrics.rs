@@ -43,3 +43,13 @@ pub fn record_settlement_completed(currency: &str, amount_minor: i64) {
     histogram!("settlements_amount_minor", "currency" => currency.to_owned())
         .record(amount_minor as f64);
 }
+
+pub fn record_db_pool_wait_duration(pool_name: &str, duration: std::time::Duration) {
+    histogram!("db_pool_wait_duration_seconds", "pool" => pool_name.to_owned())
+        .record(duration.as_secs_f64());
+}
+
+pub fn record_db_query_duration(query_name: &str, duration: std::time::Duration) {
+    histogram!("db_query_duration_seconds", "query" => query_name.to_owned())
+        .record(duration.as_secs_f64());
+}

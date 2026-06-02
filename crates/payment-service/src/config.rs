@@ -13,6 +13,7 @@ pub struct PaymentServiceConfig {
     pub vault_service_url: String,
     pub acquirer_router_url: String,
     pub fraud_service_url: String,
+    pub system_fee_percentage: f64,
 }
 
 impl PaymentServiceConfig {
@@ -74,6 +75,10 @@ impl PaymentServiceConfig {
                 .unwrap_or_else(|_| "http://localhost:8086".into()),
             fraud_service_url: std::env::var("FRAUD_SERVICE_URL")
                 .unwrap_or_else(|_| "http://localhost:8087".into()),
+            system_fee_percentage: std::env::var("SYSTEM_FEE_PERCENTAGE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.02),
         })
     }
 }

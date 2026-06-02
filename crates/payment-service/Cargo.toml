@@ -54,3 +54,4 @@ metrics-exporter-prometheus.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true }
+mockito = "1.4"

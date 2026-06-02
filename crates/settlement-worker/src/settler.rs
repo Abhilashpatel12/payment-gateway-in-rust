@@ -5,11 +5,12 @@ use uuid::Uuid;
 
 pub struct Settler {
     db: PgPool,
+    system_fee_percentage: f64,
 }
 
 impl Settler {
-    pub fn new(db: PgPool) -> Self {
-        Self { db }
+    pub fn new(db: PgPool, system_fee_percentage: f64) -> Self {
+        Self { db, system_fee_percentage }
     }
 
     
@@ -87,7 +88,7 @@ impl Settler {
             .sum();
 
         
-        let fee = (total_amount as f64 * 0.02) as i64;
+        let fee = (total_amount as f64 * self.system_fee_percentage) as i64;
         let net_amount = total_amount - fee;
 
         let settlement_id = Uuid::new_v4();

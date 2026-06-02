@@ -46,4 +46,44 @@ The `docs/` folder contains detailed technical explanations of the core architec
 
 ## Getting Started
 
-*(Add instructions on how to run locally, typically `docker-compose up` and `cargo run`)*
+To run the RustPay gateway locally, you'll need Docker and Cargo installed.
+
+1. **Start infrastructure dependencies:**
+   Spin up PostgreSQL, Redis, Kafka, Zookeeper, Prometheus, Grafana, and Jaeger:
+   ```bash
+   docker-compose up -d
+   ```
+
+2. **Configure Environment:**
+   Copy the example environment file and set your configurations:
+   ```bash
+   cp .env.example .env
+   ```
+
+3. **Run Migrations:**
+   The database migrations are applied automatically when the `postgres` container starts up via the `./migrations` volume. Wait a few seconds for the database to be ready.
+
+4. **Start the Microservices:**
+   Because this is a workspace with multiple independent microservices, Cargo needs to know which one you want to run. It's recommended to open multiple terminal tabs and run the core services individually using the `--bin` flag:
+
+   **Terminal 1 (Gateway):**
+   ```bash
+   cargo run --bin api-gateway
+   ```
+
+   **Terminal 2 (Core Payments):**
+   ```bash
+   cargo run --bin payment-service
+   ```
+
+   **Terminal 3 (Ledger):**
+   ```bash
+   cargo run --bin ledger-service
+   ```
+
+   **Terminal 4 (Outbox Worker for Kafka):**
+   ```bash
+   cargo run --bin outbox-worker
+   ```
+
+   *(Note: You can optionally use a process manager like `overmind` or `honcho` to start them all at once).*

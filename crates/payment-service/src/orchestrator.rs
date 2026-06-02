@@ -199,7 +199,7 @@ impl<'a> PaymentOrchestrator<'a> {
                     ledger.record_capture(&locked).await?;
 
                     
-                    let fee = (locked.amount as f64 * 0.02) as i64;
+                    let fee = (locked.amount as f64 * self.state.config.system_fee_percentage) as i64;
                     if fee > 0 {
                         ledger.record_fee(&locked, fee).await?;
                     }
@@ -320,22 +320,17 @@ impl<'a> PaymentOrchestrator<'a> {
         capture_amount: Option<i64>,
     ) -> AppResult<Payment> {
         
+        let payment = db::find_payment_by_id(&self.state.db, payment_id, merchant_id)
+            .await?
+            .ok_or_else(|| AppError::Internal("Payment not found".into()))?;
+
         {
-            let pool_start = std::time::Instant::now();
-            let mut tx = self.state.db.begin().await?;
-            metrics::record_db_pool_wait_duration("payment_service", pool_start.elapsed());
-            
-            let q_start = std::time::Instant::now();
-            let payment = db::lock_payment_for_update(&mut tx, payment_id, merchant_id).await?;
-            metrics::record_db_query_duration("lock_payment", q_start.elapsed());
-            
             let mut sm = PaymentStateMachine::new(payment.status);
             sm.transition(PaymentStatus::Captured)?;
-            tx.rollback().await?; 
         }
 
         
-        self.acquirer_capture(payment_id).await?;
+        self.acquirer_capture(payment_id, payment.idempotency_key).await?;
 
         
         let pool_start = std::time::Instant::now();
@@ -358,7 +353,7 @@ impl<'a> PaymentOrchestrator<'a> {
         
         let mut ledger = LedgerWriter::new(&mut tx);
         ledger.record_capture(&payment).await?;
-        let fee = (payment.captured_amount.unwrap_or(payment.amount) as f64 * 0.02) as i64;
+        let fee = (payment.captured_amount.unwrap_or(payment.amount) as f64 * self.state.config.system_fee_percentage) as i64;
         if fee > 0 {
             ledger.record_fee(&payment, fee).await?;
         }
@@ -635,12 +630,15 @@ impl<'a> PaymentOrchestrator<'a> {
         ))
     }
 
-    async fn acquirer_capture(&self, payment_id: Uuid) -> AppResult<()> {
+    async fn acquirer_capture(&self, payment_id: Uuid, idempotency_key: Option<String>) -> AppResult<()> {
         let url = format!("{}/v1/capture", self.state.config.acquirer_router_url);
+        let idem_key = idempotency_key.unwrap_or_else(|| format!("capture-{}", payment_id));
+
         let resp = self
             .state
             .http_client
             .post(&url)
+            .header("X-Idempotency-Key", idem_key)
             .json(&json!({ "payment_id": payment_id }))
             .send()
             .await
@@ -740,3 +738,110 @@ fn map_payment_method_input(input: PaymentMethodInput) -> PaymentMethod {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::PaymentServiceConfig;
+    use crate::state::AppState;
+    use common::models::{Currency, CaptureMethod, PaymentMethodInput, PaymentStatus};
+    use sqlx::postgres::PgPoolOptions;
+    use deadpool_redis::{Config as RedisConfig, Runtime};
+    use uuid::Uuid;
+    use mockito::Server;
+    use std::sync::Arc;
+
+    async fn setup_app_state(mock_server_url: String) -> AppState {
+        let db_url = std::env::var("TEST_DATABASE_URL")
+            .or_else(|_| std::env::var("DATABASE_URL"))
+            .unwrap_or_else(|_| "postgres://rustpay:rustpay_secret@localhost:5432/rustpay".into());
+        
+        let db = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&db_url)
+            .await
+            .expect("Failed to connect to DB");
+
+        let redis_url = std::env::var("REDIS_URL")
+            .unwrap_or_else(|_| "redis://:rustpay_redis_secret@localhost:6379/0".into());
+        
+        let cfg = RedisConfig::from_url(redis_url);
+        let redis = cfg.create_pool(Some(Runtime::Tokio1)).unwrap();
+
+        let config = PaymentServiceConfig {
+            server: common::config::ServerConfig { host: "0".into(), port: 0 },
+            database: common::config::DatabaseConfig { url: db_url, max_connections: 2, min_connections: 1, connect_timeout_secs: 5 },
+            redis: common::config::RedisConfig { url: "redis".into(), max_connections: 2 },
+            kafka: common::config::KafkaConfig {
+                bootstrap_servers: "localhost:9092".into(),
+                consumer_group_id: "test".into(),
+                topic_payments: "test.payments".into(),
+                topic_merchants: "test.merchants".into(),
+                topic_webhooks: "test.webhooks".into(),
+                topic_ledger: "test.ledger".into(),
+                topic_fraud: "test.fraud".into(),
+            },
+            telemetry: common::config::TelemetryConfig { otlp_endpoint: "".into(), service_name: "".into() },
+            idempotency_ttl_seconds: 3600,
+            vault_service_url: mock_server_url.clone(),
+            acquirer_router_url: mock_server_url.clone(),
+            fraud_service_url: mock_server_url.clone(),
+            system_fee_percentage: 0.02,
+        };
+
+        AppState::new(db, redis, config)
+    }
+
+    #[tokio::test]
+    async fn test_create_payment_fail_open_fraud_and_successful_charge() {
+        let mut server = Server::new_async().await;
+        
+        // Fraud service mock (returns 500 to test fail-open policy)
+        let _fraud_mock = server.mock("POST", "/v1/risk/evaluate")
+            .with_status(500)
+            .create_async()
+            .await;
+
+        // Acquirer mock
+        let _acquirer_mock = server.mock("POST", "/v1/charge")
+            .with_status(200)
+            .with_body(r#"{"acquirer_id": "acq_123", "reference": "ref_456"}"#)
+            .create_async()
+            .await;
+
+        let state = setup_app_state(server.url()).await;
+        let orchestrator = PaymentOrchestrator::new(&state);
+        let merchant_id = Uuid::new_v4();
+
+        // Ensure merchant exists in test db (merchants must exist for foreign keys if any)
+        // Note: The schema might require a merchant in `merchants` table first. Let's try inserting one.
+        let _ = sqlx::query!(
+            r#"
+            INSERT INTO merchants (id, business_name, email, kyc_status, api_key_hash, test_api_key_hash, is_active)
+            VALUES ($1, 'Test Merchant', 'test@example.com', 'approved', 'hash', 'testhash', true)
+            ON CONFLICT (id) DO NOTHING
+            "#,
+            merchant_id
+        ).execute(&state.db).await;
+
+        let req = CreatePaymentRequest {
+            amount: 1000,
+            currency: Currency::INR,
+            payment_method: PaymentMethodInput::Upi { vpa: "test@upi".into() },
+            order_id: None,
+            description: None,
+            metadata: None,
+            capture_method: Some(CaptureMethod::Automatic),
+            idempotency_key: Some(Uuid::new_v4().to_string()),
+        };
+
+        let result = orchestrator.create_payment(merchant_id, req, None).await;
+        assert!(result.is_ok(), "Payment creation failed: {:?}", result.err());
+
+        let payment = result.unwrap();
+        assert_eq!(payment.status, PaymentStatus::Captured);
+        assert_eq!(payment.amount, 1000);
+        assert_eq!(payment.acquirer_id.as_deref(), Some("acq_123"));
+    }
+}
+
