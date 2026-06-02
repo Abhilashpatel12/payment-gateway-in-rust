@@ -41,11 +41,11 @@ async fn invariant_ledger_balanced_per_merchant() {
 
         let credits = row
             .try_get::<Option<i64>, _>("total_credits")
-            .unwrap_or_else(|_| panic!("Failed to decode total_credits for merchant {merchant_id}"))
+            .unwrap_or_else(|_| panic!("Failed to get total_credits column for merchant {merchant_id}"))
             .unwrap_or(0);
         let debits = row
             .try_get::<Option<i64>, _>("total_debits")
-            .unwrap_or_else(|_| panic!("Failed to decode total_debits for merchant {merchant_id}"))
+            .unwrap_or_else(|_| panic!("Failed to get total_debits column for merchant {merchant_id}"))
             .unwrap_or(0);
 
         
