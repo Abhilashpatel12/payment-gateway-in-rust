@@ -1,61 +1,273 @@
-# Scalability Analysis & TPS Estimation
+# Scalability Analysis
 
-Based on the architectural design of RustPay (Rust, Axum, Tokio, PostgreSQL, Redis, and Kafka), the system is built for extreme high-throughput and low-latency. However, the true Transactions Per Second (TPS) limit is highly dependent on the deployed infrastructure and the configuration of connection pools.
+## Overview
 
-Here is an analysis of the theoretical limits and bottlenecks of the current architecture, followed by empirical load testing results.
+RustPay is designed as a distributed payment gateway that prioritizes financial correctness, reliability, and horizontal scalability.
 
-## Component-Level Analysis
+The system is built using:
 
-### 1. Web Framework & Async Runtime (Axum + Tokio)
-**Theoretical Limit: 50,000+ TPS per node**
-- Rust’s Tokio async runtime uses an epoll-based event loop capable of juggling hundreds of thousands of concurrent I/O operations.
-- The `api-gateway` and `payment-service` themselves add mere microseconds of overhead. CPU-bound tasks like JWT validation or HMAC signature generation are the only real compute costs here. This layer scales horizontally almost infinitely.
+- Rust
+- Axum
+- Tokio
+- PostgreSQL
+- Redis
+- Apache Kafka
 
-### 2. Idempotency & Rate Limiting (Redis)
-**Theoretical Limit: ~30,000 - 50,000 TPS**
-- The API gateway relies on Redis `SETNX` for idempotency locking and counter increments for rate limiting. 
-- A single-threaded Redis instance can handle ~100,000 commands per second. Since an idempotency check requires 1-2 network round trips to Redis per API call, Redis will max out around 30k-50k TPS unless clustered.
-- *Scaling Strategy*: Deploy a Redis Cluster to partition keys across multiple nodes.
+Key architectural patterns include:
 
-### 3. Asynchronous Messaging (Apache Kafka)
-**Theoretical Limit: 100,000+ TPS**
-- The outbox worker pushes events to Kafka, and downstream services (webhooks, fraud, ledger) consume them.
-- Kafka is horizontally scalable by increasing partition counts. It can easily handle millions of messages per second on appropriate hardware, meaning it will **never be the primary bottleneck** for this system.
-
-### 4. Relational Database (PostgreSQL) - **The Primary Bottleneck**
-**Theoretical Limit: 2,000 - 5,000 TPS (Write-Heavy)**
-- Payment systems are incredibly write-heavy and require strict ACID compliance. 
-- In RustPay, a single successful payment capture triggers a PostgreSQL transaction containing:
-  - `UPDATE` payments table (status change).
-  - `INSERT` 3x rows into `ledger_entries` (Double-entry accounting).
-  - `INSERT` 1x row into `outbox_events`.
-- **Connection Pool Limit**: Your `.env` currently limits `DATABASE_MAX_CONNECTIONS=200` (scaled up for testing). Assuming a fast SSD where this transaction takes ~5ms to commit:
-  $$ (1000ms / 5ms) * 200 \text{ connections} = 40,000 \text{ TPS theoretical limit} $$
-- If you push beyond the database's actual IOPS, the connection pool will queue requests, and latency will spike beyond the 500ms SLA.
+- Database-level idempotency
+- Double-entry accounting
+- Transactional Outbox Pattern
+- Event-driven microservices
+- Asynchronous webhook delivery
+- Distributed workers
+- Observability via Prometheus and OpenTelemetry
 
 ---
 
-## Empirical Benchmark Results (Local Hardware)
+# Scalability Goals
 
-To prove the system's structural integrity, we executed a series of extreme load tests against the local macOS environment using `k6`. 
+RustPay is designed to scale horizontally by separating responsibilities across independent services and asynchronous processing pipelines.
 
-### 🟢 Run 1: 500 TPS Sustained Load (Perfect Pass)
-The system effortlessly sustained 500 TPS (which equates to **~43.2 million transactions per day**) with zero dropped iterations and lightning-fast latency.
+Primary scalability objectives:
 
-- **Total HTTP Requests**: 31,003 (`193.7 req/s` over test stages)
-- **Duplicate Charges**: 0
-- **Success Rate**: 100.00%
-- **Average Latency**: 8.02ms
-- **p99 Latency**: 152.00ms
-
-
+- Prevent duplicate charges under concurrent requests
+- Maintain ledger consistency during failures
+- Minimize synchronous request latency
+- Decouple background processing from payment execution
+- Support independent scaling of workers and services
 
 ---
 
-## Conclusion & Scaling Path
+# Architecture Scaling Characteristics
 
-To handle hyper-scale (e.g., Black Friday traffic of 10,000+ TPS), you would need to:
-1. **Deploy to a Cloud Cluster**: Distribute the load generator, gateway, and backend services across different network instances (e.g., AWS EKS) to eliminate single-machine ephemeral port limits.
-2. **Increase Connection Pools**: Bump `DATABASE_MAX_CONNECTIONS` to 100-500, ideally using a connection bouncer like PgBouncer.
-3. **Database Sharding**: PostgreSQL will eventually lock-contend on the `merchants` or `ledger_accounts` tables (if updating merchant balances in real-time). You would need to shard the database by `merchant_id`.
-4. **Batch Outbox Processing**: Instead of polling `outbox_events` and publishing one-by-one, switch to using Postgres Logical Replication (e.g., Debezium) to stream outbox events directly from the WAL (Write-Ahead Log) into Kafka with zero polling overhead.
+## API Layer (Axum + Tokio)
+
+The API Gateway and Payment Service use Rust's asynchronous runtime to efficiently process concurrent requests.
+
+### Characteristics
+
+- Low runtime overhead
+- Non-blocking I/O
+- Horizontal scaling through service replication
+- Efficient CPU and memory utilization
+
+### Potential Bottlenecks
+
+- Database connection availability
+- External provider latency
+- Cryptographic operations
+
+---
+
+## Redis
+
+Redis is used for:
+
+- Rate limiting
+- Temporary coordination
+- Request caching
+
+### Characteristics
+
+- In-memory operations
+- Very low latency
+- High throughput
+
+### Potential Bottlenecks
+
+- Memory limits
+- Hot key contention
+- Network saturation
+
+### Scaling Strategy
+
+- Redis Cluster
+- Key partitioning
+- Read replicas
+
+---
+
+## Kafka
+
+Kafka is used as the event backbone for:
+
+- Payment events
+- Settlement workflows
+- Reconciliation workflows
+- Webhook delivery
+
+### Characteristics
+
+- Decouples services
+- Supports horizontal consumer scaling
+- Enables asynchronous processing
+
+### Potential Bottlenecks
+
+- Partition count
+- Consumer lag
+- Broker resource limits
+
+### Scaling Strategy
+
+- Additional partitions
+- Additional brokers
+- Independent consumer groups
+
+---
+
+## PostgreSQL
+
+PostgreSQL is expected to be the primary scalability bottleneck.
+
+Critical payment operations typically involve:
+
+- Payment state updates
+- Ledger entry inserts
+- Outbox event inserts
+- Transaction commits
+
+### Potential Bottlenecks
+
+- Connection pool saturation
+- Lock contention
+- Transaction duration
+- Disk I/O limits
+
+### Scaling Strategy
+
+- PgBouncer
+- Read replicas
+- Table partitioning
+- Merchant-based sharding
+
+---
+
+# Load Testing Results
+
+## Test Environment
+
+Infrastructure:
+
+- macOS
+- Docker
+- PostgreSQL
+- Redis
+- Kafka
+- RustPay Services
+- k6 Load Generator
+
+All services and the load generator were executed on a single machine.
+
+---
+
+## Verified Results
+
+### Throughput
+
+- ~194 requests/sec observed
+
+### Latency
+
+- Average: 8.02 ms
+- p95: 54.59 ms
+- p99: 152 ms
+
+### Reliability
+
+- Success Rate: 100%
+- Duplicate Charges: 0
+- Dropped Iterations: 0
+
+---
+
+## Key Findings
+
+The system successfully maintained:
+
+- Database-level idempotency
+- Correct payment state transitions
+- Stable latency under concurrent load
+- Zero duplicate charges
+- No observed application crashes
+
+The primary objective of the benchmark was to validate correctness under concurrency rather than establish the maximum throughput of the architecture.
+
+---
+
+# Future Scaling Path
+
+## Phase 1: Single-Node Deployment
+
+Components:
+
+- PostgreSQL
+- Redis
+- Kafka
+- RustPay Services
+
+Expected bottleneck:
+
+- PostgreSQL write throughput
+
+---
+
+## Phase 2: Dedicated Infrastructure
+
+Components:
+
+- Separate database host
+- Dedicated Kafka broker
+- Dedicated Redis node
+
+Benefits:
+
+- Reduced resource contention
+- Increased throughput
+- Improved latency consistency
+
+---
+
+## Phase 3: Cloud Deployment
+
+Infrastructure:
+
+- Kubernetes / ECS
+- Managed PostgreSQL
+- Managed Kafka
+- Managed Redis
+
+Benefits:
+
+- Horizontal service scaling
+- Independent worker scaling
+- Improved fault tolerance
+
+---
+
+# Future Improvements
+
+Potential improvements include:
+
+- PgBouncer connection pooling
+- Debezium CDC for outbox streaming
+- Kafka partition scaling
+- Database partitioning
+- Database sharding by merchant
+- Read replicas for reporting workloads
+- Dedicated load-testing infrastructure
+
+---
+
+# Conclusion
+
+RustPay demonstrates a scalable distributed architecture built around financial correctness and asynchronous event processing.
+
+Local benchmarking validates the architecture's behavior under concurrent load while maintaining:
+
+- Zero duplicate charges
+- Reliable state transitions
+- Consistent ledger operations
+
+Additional testing on distributed cloud infrastructure is required to determine the platform's true throughput limits.
