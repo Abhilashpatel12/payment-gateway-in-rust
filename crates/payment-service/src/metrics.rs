@@ -1,4 +1,5 @@
 use ::metrics::{counter, gauge, histogram};
+use std::time::Duration;
 
 pub fn record_payment_created(currency: &str) {
     counter!("payments_created_total", "currency" => currency.to_owned()).increment(1);
@@ -42,4 +43,12 @@ pub fn record_settlement_completed(currency: &str, amount_minor: i64) {
     counter!("settlements_completed_total", "currency" => currency.to_owned()).increment(1);
     histogram!("settlements_amount_minor", "currency" => currency.to_owned())
         .record(amount_minor as f64);
+}
+
+pub fn record_db_pool_wait_duration(service: &str, duration: Duration) {
+    common::metrics::record_db_pool_wait_duration(service, duration);
+}
+
+pub fn record_db_query_duration(query_name: &str, duration: Duration) {
+    common::metrics::record_db_query_duration(query_name, duration);
 }
