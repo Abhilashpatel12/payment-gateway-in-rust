@@ -1,0 +1,115 @@
+[workspace]
+members = [
+    "crates/common",
+    "crates/api-gateway",
+    "crates/payment-service",
+    "crates/merchant-service",
+    "crates/order-service",
+    "crates/fraud-service",
+    "crates/ledger-service",
+    "crates/webhook-service",
+    "crates/vault-service",
+    "crates/acquirer-router",
+    "crates/adapters/stripe-adapter",
+    "crates/adapters/upi-adapter",
+    "crates/outbox-worker",
+    "crates/reconciliation-service",
+    "crates/settlement-worker",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["RustPay Team"]
+license = "MIT"
+rust-version = "1.78"
+
+[workspace.dependencies]
+
+tokio = { version = "1.38", features = ["full"] }
+
+
+axum = { version = "0.7", features = ["macros", "multipart"] }
+axum-extra = { version = "0.9", features = ["typed-header"] }
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip", "timeout"] }
+hyper = { version = "1", features = ["full"] }
+
+
+tonic = { version = "0.11" }
+prost = { version = "0.12" }
+
+
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json", "migrate", "rust_decimal"] }
+
+
+deadpool-redis = { version = "0.15" }
+redis = { version = "0.25", features = ["tokio-comp", "connection-manager"] }
+
+
+rdkafka = { version = "0.36", features = ["cmake-build", "ssl"] }
+
+
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+rmp-serde = { version = "1" }
+
+
+jsonwebtoken = { version = "9" }
+hmac = { version = "0.12" }
+sha2 = { version = "0.10" }
+aes-gcm = { version = "0.10" }
+rand = { version = "0.8" }
+base64 = { version = "0.22" }
+hex = { version = "0.4" }
+argon2 = { version = "0.5" }
+
+
+governor = { version = "0.6" }
+
+
+thiserror = { version = "1" }
+anyhow = { version = "1" }
+
+
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+opentelemetry = { version = "0.22" }
+opentelemetry-otlp = { version = "0.15" }
+opentelemetry_sdk = { version = "0.22", features = ["rt-tokio"] }
+tracing-opentelemetry = { version = "0.23" }
+metrics = { version = "0.22" }
+metrics-exporter-prometheus = { version = "0.13" }
+
+
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures = { version = "0.3" }
+async-trait = { version = "0.1" }
+dotenvy = { version = "0.15" }
+config = { version = "0.14" }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+url = { version = "2" }
+validator = { version = "0.18", features = ["derive"] }
+bytes = { version = "1" }
+parking_lot = { version = "0.12" }
+once_cell = { version = "1" }
+regex = { version = "1" }
+rust_decimal = { version = "1", features = ["serde-with-str"] }
+
+
+common = { path = "crates/common" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.test]
+opt-level = 1

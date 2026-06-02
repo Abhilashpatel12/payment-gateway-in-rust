@@ -1,0 +1,26 @@
+[package]
+name = "ledger-service"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "ledger-service"
+path = "src/main.rs"
+
+[dependencies]
+common = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }
+sqlx = { workspace = true }
+rdkafka = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+dotenvy = { workspace = true }
+futures = { workspace = true }

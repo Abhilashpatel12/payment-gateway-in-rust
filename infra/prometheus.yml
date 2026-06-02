@@ -1,0 +1,36 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'rustpay-api-gateway'
+    static_configs:
+      - targets: ['host.docker.internal:9091']
+
+  - job_name: 'rustpay-payment-service'
+    static_configs:
+      - targets: ['host.docker.internal:9100']
+
+  - job_name: 'rustpay-outbox-worker'
+    static_configs:
+      - targets: ['host.docker.internal:9101']
+
+  - job_name: 'rustpay-merchant-service'
+    static_configs:
+      - targets: ['host.docker.internal:9093']
+
+  - job_name: 'rustpay-vault-service'
+    static_configs:
+      - targets: ['host.docker.internal:9095']
+
+  - job_name: 'rustpay-webhook-service'
+    static_configs:
+      - targets: ['host.docker.internal:9102']
+
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']

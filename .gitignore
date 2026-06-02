@@ -1,0 +1,38 @@
+# RustPay .gitignore
+
+# Compiled artifacts
+/target/
+**/*.rs.bk
+
+# Environment files (NEVER commit these)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# SQLx offline mode cache
+.sqlx/
+
+# Cargo lock for libraries (keep for binaries)
+# Cargo.lock  <-- Keep this for workspace binaries
+
+# Build artifacts
+*.d
+
+# Test coverage
+/coverage/
+lcov.info
+
+# Docker volumes
+postgres_data/
+redis_data/
+
+# Logs
+*.log
+logs/

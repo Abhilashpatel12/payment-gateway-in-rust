@@ -1,0 +1,28 @@
+[package]
+name = "fraud-service"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "fraud-service"
+path = "src/main.rs"
+
+[dependencies]
+common = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+dotenvy = { workspace = true }
+deadpool-redis = { workspace = true }
+redis = { workspace = true }
+validator = { workspace = true }
+async-trait = { workspace = true }
