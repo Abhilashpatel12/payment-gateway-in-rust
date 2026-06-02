@@ -6,73 +6,73 @@ The Rust Payment Gateway is designed as a high-throughput, horizontally scalable
 
 ```mermaid
 flowchart TB
-    Client((Client / Merchant App))
+    Client(("Client / Merchant App"))
 
     subgraph "External Providers"
-        MockAcq[Mock Acquirer]
-        Stripe[Stripe (Reconciliation)]
+        MockAcq["Mock Acquirer"]
+        Stripe["Stripe (Reconciliation)"]
     end
 
     subgraph "Ingress Layer"
-        Gateway[API Gateway\n(Axum, Redis Rate Limit)]
+        Gateway["API Gateway\n(Axum, Redis Rate Limit)"]
     end
 
     subgraph "Core Microservices"
-        PaymentService[Payment Service\n(State Machine)]
-        VaultService[Vault Service\n(PCI Tokenization)]
-        FraudService[Fraud Service\n(Risk Engine)]
-        LedgerService[Ledger Service\n(Double-entry Accounting)]
-        MerchantService[Merchant Service]
-        OrderService[Order Service]
+        PaymentService["Payment Service\n(State Machine)"]
+        VaultService["Vault Service\n(PCI Tokenization)"]
+        FraudService["Fraud Service\n(Risk Engine)"]
+        LedgerService["Ledger Service\n(Double-entry Accounting)"]
+        MerchantService["Merchant Service"]
+        OrderService["Order Service"]
     end
 
     subgraph "Asynchronous Workers"
-        OutboxWorker[Outbox Worker\n(CDC to Kafka)]
-        WebhookWorker[Webhook Service\n(Event Delivery)]
-        SettlementWorker[Settlement Worker]
-        ReconWorker[Reconciliation Service]
+        OutboxWorker["Outbox Worker\n(CDC to Kafka)"]
+        WebhookWorker["Webhook Service\n(Event Delivery)"]
+        SettlementWorker["Settlement Worker"]
+        ReconWorker["Reconciliation Service"]
     end
 
     subgraph "Data & Infrastructure"
-        Postgres[(PostgreSQL 16)]
-        Redis[(Redis 7)]
-        Kafka[[Kafka Event Bus]]
+        Postgres[("PostgreSQL 16")]
+        Redis[("Redis 7")]
+        Kafka[["Kafka Event Bus"]]
     end
 
     %% Client Interactions
-    Client -->|HTTPS /v1/*| Gateway
-    WebhookWorker -->|HTTPS Webhooks| Client
+    Client -->|"HTTPS /v1/*"| Gateway
+    WebhookWorker -->|"HTTPS Webhooks"| Client
 
     %% Ingress Routing
-    Gateway -->|Checks limits| Redis
-    Gateway -->|Proxies Requests| PaymentService
-    Gateway -->|Proxies Requests| MerchantService
-    Gateway -->|Proxies Requests| OrderService
+    Gateway -->|"Checks limits"| Redis
+    Gateway -->|"Proxies Requests"| PaymentService
+    Gateway -->|"Proxies Requests"| MerchantService
+    Gateway -->|"Proxies Requests"| OrderService
 
     %% Core Payment Flow
-    PaymentService -->|Tokenize Cards| VaultService
-    PaymentService -->|Evaluate Risk| FraudService
-    PaymentService -->|Route Charge| MockAcq
-    PaymentService -->|Record Entries| LedgerService
+    PaymentService -->|"Tokenize Cards"| VaultService
+    PaymentService -->|"Evaluate Risk"| FraudService
+    PaymentService -->|"Route Charge"| MockAcq
+    PaymentService -->|"Record Entries"| LedgerService
 
     %% Data Persistence
-    PaymentService -->|ACID Transactions| Postgres
-    MerchantService -->|CRUD| Postgres
-    OrderService -->|CRUD| Postgres
-    VaultService -->|Encrypted Storage| Postgres
+    PaymentService -->|"ACID Transactions"| Postgres
+    MerchantService -->|"CRUD"| Postgres
+    OrderService -->|"CRUD"| Postgres
+    VaultService -->|"Encrypted Storage"| Postgres
 
     %% Event Driven Architecture (Outbox Pattern)
-    OutboxWorker -->|Reads outbox table| Postgres
-    OutboxWorker -->|Publishes Events| Kafka
+    OutboxWorker -->|"Reads outbox table"| Postgres
+    OutboxWorker -->|"Publishes Events"| Kafka
 
     %% Asynchronous Consumers
-    Kafka -->|Consumes Events| WebhookWorker
-    Kafka -->|Consumes Events| SettlementWorker
-    Kafka -->|Consumes Events| ReconWorker
+    Kafka -->|"Consumes Events"| WebhookWorker
+    Kafka -->|"Consumes Events"| SettlementWorker
+    Kafka -->|"Consumes Events"| ReconWorker
 
     %% Batch Processes
-    SettlementWorker -->|Updates balances| Postgres
-    ReconWorker -->|Fetches provider data| Stripe
+    SettlementWorker -->|"Updates balances"| Postgres
+    ReconWorker -->|"Fetches provider data"| Stripe
 ```
 
 ## Key Architectural Patterns

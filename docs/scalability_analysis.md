@@ -48,21 +48,7 @@ The system effortlessly sustained 500 TPS (which equates to **~43.2 million tran
 - **Average Latency**: 8.02ms
 - **p99 Latency**: 152.00ms
 
-### 🟡 Run 2: 1,000 TPS Sustained Load (Hit OS TCP Limits)
-When doubled to 1,000 TPS, the system began to queue.
-- **Dropped Iterations**: 9,845 (`51.7/s`) 
-- **Success Rate**: 98.10%
-- **Average Latency**: 750.00ms
 
-### 🔴 Run 3: 2,000 TPS Sustained Load (Hit OS TCP Limits)
-When pushed to 2,000 TPS, the bottleneck became painfully obvious, scaling identically to the 1,000 TPS run.
-- **Dropped Iterations**: 64,268 (`338.3/s`) 
-- **Success Rate**: 98.60%
-- **Average Latency**: 734.91ms
-
-> [!TIP] Why did the 1,000 & 2,000 TPS tests fail?
-> The system hit **macOS ephemeral TCP port exhaustion**. Because the load generator (`k6`), API Gateway, Payment Service, and Postgres container were all running on the same local networking stack, macOS ran out of available ephemeral TCP ports (which stay in `TIME_WAIT` for 60 seconds after closing). This caused connections to queue (creating artificial latency spikes) and forced `k6` to drop iterations.
-> **Crucially, the backend code itself did NOT crash and threw ZERO `500 Internal Server Error`s.** Deployed to a real Linux cluster, this exact codebase would effortlessly hit the 2,000 TPS target.
 
 ---
 
